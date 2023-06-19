@@ -1,6 +1,64 @@
 pub mod dkg;
-fn main() {
-    println!("Hello, world!");
+use axum::{
+    error_handling::HandleErrorLayer,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, patch},
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tower::{BoxError, ServiceBuilder};
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "example_todos=debug,tower_http=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    // let db = Db::default();
+
+    // Compose the routes
+    let app = Router::new()
+        // .route("/todos", get(todos_index).post(todos_create))
+        // .route("/todos/:id", patch(todos_update).delete(todos_delete))
+        // Add middleware to all routes
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|error: BoxError| async move {
+                    if error.is::<tower::timeout::error::Elapsed>() {
+                        Ok(StatusCode::REQUEST_TIMEOUT)
+                    } else {
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {}", error),
+                        ))
+                    }
+                }))
+                .timeout(Duration::from_secs(10))
+                .layer(TraceLayer::new_for_http())
+                .into_inner(),
+        );
+        // .with_state(db);
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    tracing::debug!("listening on {}", addr);
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
 // test
@@ -18,7 +76,7 @@ mod test {
         let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
 
         // Two out of four shares will suffice to sign or encrypt something.
-        let (threshold, node_num) = (1, 4);
+        let (threshold, node_num) = (0, 2);
 
         // Generate individual key pairs for encryption. These are not suitable for threshold schemes.
         let sec_keys: Vec<SecretKey> = (0..node_num).map(|_| rand::random()).collect();
@@ -36,6 +94,9 @@ mod test {
             nodes.insert(id, sync_key_gen);
             parts.push((id, opt_part.unwrap())); // Would be `None` for observer nodes.
         }
+
+        println!("nodes: {:?}", nodes);
+        println!("parts: {:?}", parts);
 
         // All nodes now handle the parts and send the resulting `Ack` messages.
         let mut acks = Vec::new();
@@ -87,16 +148,18 @@ mod test {
             secret_key_shares.insert(id, sks);
         }
 
+        println!("secret_key_shares {:?}", secret_key_shares);
+
         // Two out of four nodes can now sign a message. Each share can be verified individually.
         let msg = "Nodes 0 and 1 does not agree with this.";
         let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
         for (&id, sks) in &secret_key_shares {
-            if id != 0 && id != 1 {
+            // if id != 0 && id != 1 {
                 let sig_share = sks.sign(msg);
                 let pks = pub_key_set.public_key_share(id);
                 assert!(pks.verify(&sig_share, msg));
                 sig_shares.insert(id, sig_share);
-            }
+            // }
         }
 
         // Two signatures are over the threshold. They are enough to produce a signature that matches
