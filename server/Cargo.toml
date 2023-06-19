@@ -6,3 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bincode = "1.2.0"
+failure = "0.1.6"
+rand = "0.6.5"
+rand_derive = "0.5.0"
+serde = { version = "1.0.102", features = ["derive", "rc"] }
+threshold_crypto = { rev = "624eeee", git = "https://github.com/poanetwork/threshold_crypto" }
