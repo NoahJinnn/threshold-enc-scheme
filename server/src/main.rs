@@ -4,13 +4,14 @@ use axum::{
     routing::post, Json, Router,
 };
 use axum_macros::debug_handler;
-use dkg::{Ack, NodeIdT, Part, PubKeyMap, SyncKeyGen};
+use dkg::{Ack, NodeIdT, Part, PartOutcome, PubKeyMap, SyncKeyGen};
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, HashMap},
     net::SocketAddr,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
 use threshold_crypto::SecretKey;
@@ -19,9 +20,12 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
+
+#[derive(Debug, Clone)]
 struct Session {
+    secret: OsRng,
     sk: SecretKey,
-    node: SyncKeyGen<usize>,
+    node: Arc<Mutex<SyncKeyGen<usize>>>,
     parts: Vec<Part>,
     acks: Vec<Ack>,
     success: bool,
@@ -101,14 +105,14 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
     };
     let acks = vec![];
     let session = Session {
+        secret: rng,
         sk,
-        node: sync_key_gen,
+        node: Arc::new(Mutex::new(sync_key_gen)),
         parts,
         acks,
         success: false,
     };
     db.write().unwrap().insert(0, session);
-
 
     Json(resp)
 }
@@ -116,23 +120,57 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct CommitReq {
     p1_part: Part,
-    p1_ack: Ack,
+    p1_acks: Vec<Ack>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct CommitResp {
-    p0_ack: Ack,
+    p0_acks: Vec<Ack>,
 }
 
 async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl IntoResponse {
-    let mut parts = db.read().unwrap().get(&0).unwrap().parts.clone();
+    let session = db.read().unwrap().get(&0).cloned().unwrap();
+    let mut rng = session.secret;
+
+    let mut parts = session.parts;
     parts.insert(1, req_body.p1_part.clone());
+
+    let arc_node = session.node.clone();
+    let mut node = arc_node.try_lock().unwrap();
+
     let mut acks = vec![];
-    acks.insert(1, req_body.p1_ack.clone());
-    // db.write().unwrap().insert(todo.id, todo.clone());
-    let resp = CommitResp {
-        p0_ack: acks[0].clone(),
-    };
     
+    for part in parts.clone() {
+        // We only have 2 participants
+        for id in 0..1 {
+            match node
+                .handle_part(&id, part.clone(), &mut rng)
+                .expect("Failed to handle Part")
+            {
+                PartOutcome::Valid(Some(ack)) => acks.push(ack),
+                PartOutcome::Invalid(fault) => panic!("Invalid Part: {:?}", fault),
+                PartOutcome::Valid(None) => {
+                    panic!("We are not an observer, so we should send Ack.")
+                }
+            }
+        }
+    }
+
+    for ack in req_body.p1_acks.into_iter() {
+        acks.push(ack);
+    }
+    let resp_acks = acks.clone();
+
+    let updated_session = Session {
+        secret: rng,
+        sk: session.sk,
+        node: session.node,
+        parts: parts,
+        acks: acks,
+        success: false,
+    };
+    db.write().unwrap().insert(0, updated_session);
+    let resp = CommitResp { p0_acks: resp_acks };
+
     Json(resp)
 }
