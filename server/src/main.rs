@@ -4,7 +4,7 @@ use axum::{
     routing::post, Json, Router,
 };
 use axum_macros::debug_handler;
-use dkg::{Ack, NodeIdT, Part, PartOutcome, PubKeyMap, SyncKeyGen};
+use dkg::{Ack, AckOutcome, NodeIdT, Part, PartOutcome, PubKeyMap, SyncKeyGen};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
-use threshold_crypto::SecretKey;
+use threshold_crypto::{SecretKey, SecretKeyShare, SignatureShare};
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -47,8 +47,7 @@ async fn main() {
     let app = Router::new()
         .route("/init_dkg", post(init_dkg))
         .route("/commit", post(commit))
-        // .route("/commit_ack", post(commit_ack))
-        // .route("/finalize_dkg", post(finalize_dkg))
+        .route("/finalize_dkg", post(finalize_dkg))
         // Add middleware to all routes
         .layer(
             ServiceBuilder::new()
@@ -139,7 +138,7 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
     let mut node = arc_node.try_lock().unwrap();
 
     let mut acks = vec![];
-    
+
     for part in parts.clone() {
         // We only have 2 participants
         for id in 0..1 {
@@ -173,4 +172,47 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
     let resp = CommitResp { p0_acks: resp_acks };
 
     Json(resp)
+}
+
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct FinalizeReq {
+    signed_msg: String,
+    sig_share_1: SignatureShare,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct FinalizeResp {
+    is_success: bool
+}
+async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -> impl IntoResponse {
+    let session = db.read().unwrap().get(&0).cloned().unwrap();
+    let arc_node = session.node.clone();
+    let mut node = arc_node.try_lock().unwrap();
+    let acks = session.acks;
+    // Finally, we handle all the `Ack`s.
+    for ack in acks {
+        for id in 0..1 {
+            match node
+                .handle_ack(&id, ack.clone())
+                .expect("Failed to handle Ack")
+            {
+                AckOutcome::Valid => (),
+                AckOutcome::Invalid(fault) => panic!("Invalid Ack: {:?}", fault),
+            }
+        }
+    }
+    let pub_key_set = node
+        .generate()
+        .expect("Failed to create `PublicKeySet` from node #0")
+        .0;
+    assert!(node.is_ready());
+    let (pks, _) = node.generate().unwrap_or_else(|_| {
+        panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #0")
+    });
+    assert_eq!(pks, pub_key_set); // All nodes now know the public keys and public key shares.
+    let pks_0 = pub_key_set.public_key_share(0);
+
+
+    Json(FinalizeResp { is_success: pks_0.verify(&req_body.sig_share_1, req_body.signed_msg) })
 }

@@ -38,15 +38,16 @@ struct Signup {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+    let mut number = 0;
     match &cli.command {
         Some(Commands::Login(_login)) => {
+            number = number + 1;
             println!("Start Login!");
             
         }
         Some(Commands::Signup(_name)) => {
+            println!("{}", number);
             println!("Start Signup!");
-           
         }
         None => {}
     }

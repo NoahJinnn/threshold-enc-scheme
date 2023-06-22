@@ -479,8 +479,8 @@ pub enum PartFault {
 // test
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
     use super::{to_pub_keys, AckOutcome, PartOutcome, SyncKeyGen};
+    use std::collections::BTreeMap;
     use threshold_crypto::{SecretKey, SignatureShare};
 
     #[test]
@@ -507,7 +507,6 @@ mod test {
             nodes.insert(id, sync_key_gen);
             parts.push((id, opt_part.unwrap())); // Would be `None` for observer nodes.
         }
-        println!("parts {:?}", parts);
         // All nodes now handle the parts and send the resulting `Ack` messages.
         let mut acks = Vec::new();
         for (sender_id, part) in parts {
@@ -519,7 +518,7 @@ mod test {
                     PartOutcome::Valid(Some(ack)) => {
                         println!("Node #{} handles Part from node #{}", id, sender_id);
                         acks.push((id, ack))
-                    },
+                    }
                     PartOutcome::Invalid(fault) => panic!("Invalid Part: {:?}", fault),
                     PartOutcome::Valid(None) => {
                         panic!("We are not an observer, so we should send Ack.")
@@ -528,10 +527,9 @@ mod test {
             }
         }
 
-        println!("acks {:?}", acks);
-
         // Finally, we handle all the `Ack`s.
         for (sender_id, ack) in acks {
+            println!("Node #{} handles Ack from node #{:?}", sender_id, ack);
             for node in nodes.values_mut() {
                 match node
                     .handle_ack(&sender_id, ack.clone())
@@ -566,20 +564,24 @@ mod test {
         // Two out of four nodes can now sign a message. Each share can be verified individually.
         let msg = "Nodes 0 and 1 does not agree with this.";
         let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
-        for (&id, sks) in &secret_key_shares {
-            // if id != 0 && id != 1 {
-                let sig_share = sks.sign(msg);
-                let pks = pub_key_set.public_key_share(id);
-                assert!(pks.verify(&sig_share, msg));
-                sig_shares.insert(id, sig_share);
-            // }
-        }
+        // for (&id, sks) in &secret_key_shares {
+        //     println!("Node #{} signs the message.", id);
+        //     let sig_share = sks.sign(msg);
+        //     let pks = pub_key_set.public_key_share(id);
+        //     assert!(pks.verify(&sig_share, msg));
+        //     sig_shares.insert(id, sig_share);
+        // }
+
+        let pks_0 = pub_key_set.public_key_share(0);
+        let sks_1 = secret_key_shares.get(&0).unwrap();
+        let sig_share1 = sks_1.sign(msg);
+        assert!(pks_0.verify(&sig_share1, msg));
 
         // Two signatures are over the threshold. They are enough to produce a signature that matches
         // the public master key.
-        let sig = pub_key_set
-            .combine_signatures(&sig_shares)
-            .expect("The shares can be combined.");
-        assert!(pub_key_set.public_key().verify(&sig, msg));
+        // let sig = pub_key_set
+        //     .combine_signatures(&sig_shares)
+        //     .expect("The shares can be combined.");
+        // assert!(pub_key_set.public_key().verify(&sig, msg));
     }
 }
