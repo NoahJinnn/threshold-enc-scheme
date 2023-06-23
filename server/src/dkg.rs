@@ -567,25 +567,28 @@ mod test {
 
         // Two out of four nodes can now sign a message. Each share can be verified individually.
         let msg = "Nodes 0 and 1 does not agree with this.";
-        let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
-        for (&id, sks) in &secret_key_shares {
-            println!("Node #{} signs the message.", id);
-            let sig_share = sks.sign(msg);
-            let pks = pub_key_set.public_key_share(id);
-            assert!(pks.verify(&sig_share, msg));
-            sig_shares.insert(id, sig_share);
-        }
+        // let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
+        // for (&id, sks) in &secret_key_shares {
+        //     println!("Node #{} signs the message.", id);
+        //     let sig_share = sks.sign(msg);
+        //     let pks = pub_key_set.public_key_share(id);
+        //     assert!(pks.verify(&sig_share, msg));
+        //     sig_shares.insert(id, sig_share);
+        // }
 
-        // let pks_0 = pub_key_set.public_key_share(0);
-        // let sks_1 = secret_key_shares.get(&0).unwrap();
-        // let sig_share1 = sks_1.sign(msg);
-        // assert!(pks_0.verify(&sig_share1, msg));
+        let pks_0 = pub_key_set.public_key_share(0);
+        let sks_0 = secret_key_shares.get(&0).unwrap();
+        let sks_1 = secret_key_shares.get(&1).unwrap();
+        let sig_share0 = sks_0.sign(msg);
+        let sig_share1 = sks_1.sign(msg);
+        assert!(pks_0.verify(&sig_share0, msg));
+        assert!(pks_0.verify(&sig_share1, msg));
 
         // Two signatures are over the threshold. They are enough to produce a signature that matches
         // the public master key.
-        let sig = pub_key_set
-            .combine_signatures(&sig_shares)
-            .expect("The shares can be combined.");
-        assert!(pub_key_set.public_key().verify(&sig, msg));
+        // let sig = pub_key_set
+        //     .combine_signatures(&sig_shares)
+        //     .expect("The shares can be combined.");
+        // assert!(pub_key_set.public_key().verify(&sig, msg));
     }
 }

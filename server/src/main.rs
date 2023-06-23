@@ -171,7 +171,6 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinalizeReq {
     signed_msg: String,
-    sig_share_1: SignatureShare,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -200,12 +199,15 @@ async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -
         .expect("Failed to create `PublicKeySet` from node #0")
         .0;
     assert!(node.is_ready());
-    let (pks, _) = node.generate().unwrap_or_else(|_| {
+    let (pks, opt_sks) = node.generate().unwrap_or_else(|_| {
         panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #0")
     });
     assert_eq!(pks, pub_key_set); // All nodes now know the public keys and public key shares.
+   
+    let sks_0 = opt_sks.expect("Not an observer node: We receive a secret key share.");
+    let sig_share = sks_0.sign(&req_body.signed_msg);
     let pks_0 = pub_key_set.public_key_share(0);
+    
 
-
-    Json(FinalizeResp { is_success: pks_0.verify(&req_body.sig_share_1, req_body.signed_msg) })
+    Json(FinalizeResp { is_success: pks_0.verify(&sig_share, &req_body.signed_msg) })
 }
