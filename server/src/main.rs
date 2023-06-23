@@ -4,17 +4,16 @@ use axum::{
     routing::post, Json, Router,
 };
 use axum_macros::debug_handler;
-use dkg::{Ack, AckOutcome, NodeIdT, Part, PartOutcome, PubKeyMap, SyncKeyGen};
+use dkg::{Ack, AckOutcome, Part, PartOutcome, PubKeyMap, SyncKeyGen};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, HashMap},
     net::SocketAddr,
     sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
-use threshold_crypto::{SecretKey, SecretKeyShare, SignatureShare};
+use threshold_crypto::{SecretKey, SignatureShare};
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -23,12 +22,10 @@ type Db = Arc<RwLock<HashMap<usize, Session>>>;
 
 #[derive(Debug, Clone)]
 struct Session {
-    secret: OsRng,
     sk: SecretKey,
     node: Arc<Mutex<SyncKeyGen<usize>>>,
     parts: Vec<Part>,
     acks: Vec<Ack>,
-    success: bool,
 }
 
 #[tokio::main]
@@ -104,12 +101,10 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
     };
     let acks = vec![];
     let session = Session {
-        secret: rng,
         sk,
         node: Arc::new(Mutex::new(sync_key_gen)),
         parts,
         acks,
-        success: false,
     };
     db.write().unwrap().insert(0, session);
 
@@ -129,7 +124,7 @@ struct CommitResp {
 
 async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl IntoResponse {
     let session = db.read().unwrap().get(&0).cloned().unwrap();
-    let mut rng = session.secret;
+    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
 
     let mut parts = session.parts;
     parts.insert(1, req_body.p1_part.clone());
@@ -161,12 +156,10 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
     let resp_acks = acks.clone();
 
     let updated_session = Session {
-        secret: rng,
         sk: session.sk,
         node: session.node,
-        parts: parts,
-        acks: acks,
-        success: false,
+        parts,
+        acks,
     };
     db.write().unwrap().insert(0, updated_session);
     let resp = CommitResp { p0_acks: resp_acks };

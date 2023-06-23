@@ -1,7 +1,13 @@
 pub mod dkg;
+use std::sync::{Mutex, Arc};
+
 use ::clap::{Args, Parser, Subcommand};
 use anyhow::Result;
+use dkg::{SyncKeyGen, Part, Ack};
+use rand::rngs::OsRng;
 use reqwest::{Client, Response, Url};
+use serde::{Deserialize, Serialize};
+use threshold_crypto::SecretKey;
 
 
 #[derive(Parser)]
@@ -35,18 +41,26 @@ struct Signup {
     // string: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct Session {
+    // secret: OsRng,
+    sk: SecretKey,
+    // node: Arc<Mutex<SyncKeyGen<usize>>>,
+    parts: Vec<Part>,
+    acks: Vec<Ack>,
+}
+
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let mut number = 0;
     match &cli.command {
         Some(Commands::Login(_login)) => {
-            number = number + 1;
-            println!("Start Login!");
+            let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+            println!("Start Login! {:?}", rng);
             
         }
         Some(Commands::Signup(_name)) => {
-            println!("{}", number);
             println!("Start Signup!");
         }
         None => {}

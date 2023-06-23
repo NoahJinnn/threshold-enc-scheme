@@ -481,12 +481,14 @@ pub enum PartFault {
 mod test {
     use super::{to_pub_keys, AckOutcome, PartOutcome, SyncKeyGen};
     use std::collections::BTreeMap;
+    use rand::RngCore;
     use threshold_crypto::{SecretKey, SignatureShare};
 
     #[test]
     fn test_all() {
         // Use the OS random number generator for any randomness:
-        let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+        // let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+        
 
         // Two out of four shares will suffice to sign or encrypt something.
         let (threshold, node_num) = (0, 2);
@@ -500,10 +502,11 @@ mod test {
         let mut nodes = BTreeMap::new();
         let mut parts = Vec::new();
         for (id, sk) in sec_keys.into_iter().enumerate() {
-            let (sync_key_gen, opt_part) =
-                SyncKeyGen::new(id, sk, pub_keys.clone(), threshold, &mut rng).unwrap_or_else(
-                    |_| panic!("Failed to create `SyncKeyGen` instance for node #{}", id),
-                );
+            let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+            let (sync_key_gen, opt_part) = SyncKeyGen::new(id, sk, pub_keys.clone(), threshold, &mut rng)
+                .unwrap_or_else(|_| {
+                    panic!("Failed to create `SyncKeyGen` instance for node #{}", id)
+                });
             nodes.insert(id, sync_key_gen);
             parts.push((id, opt_part.unwrap())); // Would be `None` for observer nodes.
         }
@@ -511,6 +514,7 @@ mod test {
         let mut acks = Vec::new();
         for (sender_id, part) in parts {
             for (&id, node) in &mut nodes {
+                let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
                 match node
                     .handle_part(&sender_id, part.clone(), &mut rng)
                     .expect("Failed to handle Part")
@@ -564,24 +568,24 @@ mod test {
         // Two out of four nodes can now sign a message. Each share can be verified individually.
         let msg = "Nodes 0 and 1 does not agree with this.";
         let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
-        // for (&id, sks) in &secret_key_shares {
-        //     println!("Node #{} signs the message.", id);
-        //     let sig_share = sks.sign(msg);
-        //     let pks = pub_key_set.public_key_share(id);
-        //     assert!(pks.verify(&sig_share, msg));
-        //     sig_shares.insert(id, sig_share);
-        // }
+        for (&id, sks) in &secret_key_shares {
+            println!("Node #{} signs the message.", id);
+            let sig_share = sks.sign(msg);
+            let pks = pub_key_set.public_key_share(id);
+            assert!(pks.verify(&sig_share, msg));
+            sig_shares.insert(id, sig_share);
+        }
 
-        let pks_0 = pub_key_set.public_key_share(0);
-        let sks_1 = secret_key_shares.get(&0).unwrap();
-        let sig_share1 = sks_1.sign(msg);
-        assert!(pks_0.verify(&sig_share1, msg));
+        // let pks_0 = pub_key_set.public_key_share(0);
+        // let sks_1 = secret_key_shares.get(&0).unwrap();
+        // let sig_share1 = sks_1.sign(msg);
+        // assert!(pks_0.verify(&sig_share1, msg));
 
         // Two signatures are over the threshold. They are enough to produce a signature that matches
         // the public master key.
-        // let sig = pub_key_set
-        //     .combine_signatures(&sig_shares)
-        //     .expect("The shares can be combined.");
-        // assert!(pub_key_set.public_key().verify(&sig, msg));
+        let sig = pub_key_set
+            .combine_signatures(&sig_shares)
+            .expect("The shares can be combined.");
+        assert!(pub_key_set.public_key().verify(&sig, msg));
     }
 }
