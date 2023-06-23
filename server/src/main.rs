@@ -5,7 +5,6 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use dkg::{Ack, AckOutcome, Part, PartOutcome, PubKeyMap, SyncKeyGen};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -13,7 +12,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
-use threshold_crypto::{SecretKey, SignatureShare};
+use threshold_crypto::{SecretKey, PublicKeyShare};
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -170,7 +169,7 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinalizeReq {
-    signed_msg: String,
+    pks_1: PublicKeyShare
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -203,11 +202,13 @@ async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -
         panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #0")
     });
     assert_eq!(pks, pub_key_set); // All nodes now know the public keys and public key shares.
-   
+    let msg = "Sign this";
     let sks_0 = opt_sks.expect("Not an observer node: We receive a secret key share.");
-    let sig_share = sks_0.sign(&req_body.signed_msg);
+    let sig_share = sks_0.sign(msg);
     let pks_0 = pub_key_set.public_key_share(0);
-    
-
-    Json(FinalizeResp { is_success: pks_0.verify(&sig_share, &req_body.signed_msg) })
+    let pks_1 = req_body.pks_1;
+    let is_success_pks_0 = pks_0.verify(&sig_share, msg);
+    let is_success_pks_1 = pks_1.verify(&sig_share, msg);
+    let is_success = is_success_pks_0 && is_success_pks_1;
+    Json(FinalizeResp { is_success })
 }
