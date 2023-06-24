@@ -6,16 +6,16 @@ use axum::{
 use axum_macros::debug_handler;
 use dkg::{Ack, AckOutcome, Part, PartOutcome, PubKeyMap, SyncKeyGen};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use std::{
     collections::{BTreeMap, HashMap},
     net::SocketAddr,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     time::Duration,
 };
 use threshold_crypto::{SecretKey, PublicKeyShare};
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
 
@@ -29,13 +29,9 @@ struct Session {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "example_todos=debug,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::fmt()
+    .with_max_level(tracing::Level::DEBUG)
+    .init();
 
     let db = Db::default();
 
@@ -82,6 +78,7 @@ struct InitDkgResp {
 }
 #[debug_handler]
 async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> impl IntoResponse {
+    println!("req_body {:?}", req_body);
     let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
     let threshold = 0;
     let sk: SecretKey = rand::random();
@@ -122,6 +119,7 @@ struct CommitResp {
 }
 
 async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl IntoResponse {
+    println!("req_body {:?}", req_body);
     let session = db.read().unwrap().get(&0).cloned().unwrap();
     let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
 
@@ -133,20 +131,21 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
 
     let mut acks = vec![];
 
-    for part in parts.clone() {
+    for (id, part) in parts.clone().iter().enumerate() {
         // We only have 2 participants
-        for id in 0..1 {
             match node
                 .handle_part(&id, part.clone(), &mut rng)
                 .expect("Failed to handle Part")
             {
                 PartOutcome::Valid(Some(ack)) => acks.push(ack),
-                PartOutcome::Invalid(fault) => panic!("Invalid Part: {:?}", fault),
+                PartOutcome::Invalid(fault) => panic!(
+                    "Node #0 handles Part from node #{} and detects a fault: {:?}",
+                    id, fault
+                ),
                 PartOutcome::Valid(None) => {
                     panic!("We are not an observer, so we should send Ack.")
                 }
             }
-        }
     }
 
     for ack in req_body.p1_acks.into_iter() {
@@ -177,6 +176,7 @@ struct FinalizeResp {
     is_success: bool
 }
 async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -> impl IntoResponse {
+    println!("req_body {:?}", req_body);
     let session = db.read().unwrap().get(&0).cloned().unwrap();
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
@@ -210,5 +210,6 @@ async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -
     let is_success_pks_0 = pks_0.verify(&sig_share, msg);
     let is_success_pks_1 = pks_1.verify(&sig_share, msg);
     let is_success = is_success_pks_0 && is_success_pks_1;
+    println!("is_success {:?}", is_success);
     Json(FinalizeResp { is_success })
 }

@@ -501,8 +501,8 @@ mod test {
         // be sent to all other participants, so we save the parts together with their sender ID.
         let mut nodes = BTreeMap::new();
         let mut parts = Vec::new();
+        let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
         for (id, sk) in sec_keys.into_iter().enumerate() {
-            let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
             let (sync_key_gen, opt_part) = SyncKeyGen::new(id, sk, pub_keys.clone(), threshold, &mut rng)
                 .unwrap_or_else(|_| {
                     panic!("Failed to create `SyncKeyGen` instance for node #{}", id)
@@ -510,11 +510,13 @@ mod test {
             nodes.insert(id, sync_key_gen);
             parts.push((id, opt_part.unwrap())); // Would be `None` for observer nodes.
         }
+
+        println!("Parts: {:?}", parts);
         // All nodes now handle the parts and send the resulting `Ack` messages.
         let mut acks = Vec::new();
+        let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
         for (sender_id, part) in parts {
             for (&id, node) in &mut nodes {
-                let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
                 match node
                     .handle_part(&sender_id, part.clone(), &mut rng)
                     .expect("Failed to handle Part")
@@ -530,11 +532,11 @@ mod test {
                 }
             }
         }
-
+        println!("Acks: {:?}", acks);
         // Finally, we handle all the `Ack`s.
         for (sender_id, ack) in acks {
-            println!("Node #{} handles Ack from node #{:?}", sender_id, ack);
             for node in nodes.values_mut() {
+                println!("Node #{} handles Ack from node #{:?}", sender_id, ack);
                 match node
                     .handle_ack(&sender_id, ack.clone())
                     .expect("Failed to handle Ack")

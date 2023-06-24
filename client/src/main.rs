@@ -5,18 +5,19 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use dkg::{Ack, AckOutcome, Part, PartOutcome, PubKeyMap, SyncKeyGen};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     error::Error,
     net::SocketAddr,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     time::Duration,
 };
 use threshold_crypto::{PublicKeyShare, SecretKey};
+use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
 
@@ -30,12 +31,8 @@ struct Session {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "example_todos=debug,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
         .init();
 
     let db = Db::default();
@@ -64,7 +61,7 @@ async fn main() {
         )
         .with_state(db);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
@@ -83,22 +80,25 @@ async fn init_dkg(State(db): State<Db>) -> impl IntoResponse {
     let sk: SecretKey = rand::random();
     let p1_pk = sk.public_key();
     let mut map = BTreeMap::new();
-    map.insert(0, p1_pk.clone());
 
-    // Send req to server
+    // // Send req to server
     let req_body = InitDkgReq {
         p1_pk: p1_pk.clone(),
     };
-
-    let dkg_init_resp = init_dkg_req("domain", &req_body).unwrap();
+    let dkg_init_resp: InitDkgResp = init_dkg_req("http://127.0.0.1:3000", &req_body)
+        .await
+        .unwrap();
 
     map.insert(0, dkg_init_resp.p0_pk);
-    map.insert(1, req_body.p1_pk.clone());
+    map.insert(1, p1_pk.clone());
     let pub_keys: PubKeyMap<usize, threshold_crypto::PublicKey> = Arc::new(map);
     let (sync_key_gen, opt_part) =
-        SyncKeyGen::new(0, sk.clone(), pub_keys.clone(), threshold, &mut rng)
-            .unwrap_or_else(|_| panic!("Failed to create `SyncKeyGen` instance for node #{}", 0));
-    let parts = vec![dkg_init_resp.p0_part, opt_part.unwrap().clone()];
+        SyncKeyGen::new(1, sk.clone(), pub_keys.clone(), threshold, &mut rng)
+            .unwrap_or_else(|_| panic!("Failed to create `SyncKeyGen` instance for node #{}", 1));
+    let p1_part = opt_part.unwrap().clone();
+    println!("opt_part: {:?}", p1_part);
+    println!("p0_part: {:?}", dkg_init_resp.p0_part.clone());
+    let parts = vec![dkg_init_resp.p0_part, p1_part];
 
     let acks = vec![];
     let session = Session {
@@ -126,19 +126,25 @@ async fn commit(State(db): State<Db>) -> impl IntoResponse {
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
     let mut p1_acks = vec![];
-
-    for part in parts.clone() {
+    println!("parts: {:?}", parts);
+    for (id, part) in parts.clone().iter().enumerate() {
         // We only have 2 participants
-        for id in 0..1 {
-            match node
-                .handle_part(&id, part.clone(), &mut rng)
-                .expect("Failed to handle Part")
-            {
-                PartOutcome::Valid(Some(ack)) => p1_acks.push(ack),
-                PartOutcome::Invalid(fault) => panic!("Invalid Part: {:?}", fault),
-                PartOutcome::Valid(None) => {
-                    panic!("We are not an observer, so we should send Ack.")
-                }
+        match node
+            .handle_part(&id, part.clone(), &mut rng)
+            .expect("Failed to handle Part")
+        {
+            PartOutcome::Valid(Some(ack)) => {
+                println!("Node #1 handles Part from node success #{}", id);
+                p1_acks.push(ack)
+            }
+            PartOutcome::Invalid(fault) => {
+                panic!(
+                    "Node #1 handles Part from node #{} and detects a fault: {:?}",
+                    id, fault
+                )
+            }
+            PartOutcome::Valid(None) => {
+                panic!("We are not an observer, so we should send Ack.")
             }
         }
     }
@@ -148,9 +154,11 @@ async fn commit(State(db): State<Db>) -> impl IntoResponse {
         p1_part: parts[1].clone(),
         p1_acks: p1_acks.clone(),
     };
-
-    let commit_resp = commit_req("domain", &req_body).unwrap();
+    let commit_resp: CommitResp = commit_req("http://127.0.0.1:3000", &req_body)
+        .await
+        .unwrap();
     let p0_acks = commit_resp.p0_acks;
+
     let mut acks = vec![];
     for ack in p0_acks {
         acks.push(ack);
@@ -208,7 +216,9 @@ async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
     let req_body = FinalizeReq {
         pks_1: pks_1.clone(),
     };
-    let is_success = finalize_dkg_req("domain", &req_body).unwrap();
+    let is_success = finalize_dkg_req("http://127.0.0.1:3000", &req_body)
+        .await
+        .unwrap();
     println!("is_success: {:?}", is_success);
     Json(())
 }
@@ -219,12 +229,12 @@ struct InitDkgResp {
     p0_part: Part,
 }
 
-fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Box<dyn Error>> {
+async fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Box<dyn Error>> {
     let url = format!("{}/init_dkg", domain);
-    let client = reqwest::blocking::Client::new();
-    let body_str = serde_json::to_string(body)?;
-    let response = client.post(&url).body(body_str).send()?;
-    let response_text = response.text()?;
+    let client: Client = Client::new();
+    let response = client.post(&url).json(body).send().await?;
+    let response_text = response.text().await?;
+    println!("response_text: {:?}", response_text);
     let resp: InitDkgResp = serde_json::from_str(&response_text)?;
     Ok(resp)
 }
@@ -233,12 +243,11 @@ fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Box<dyn 
 struct CommitResp {
     p0_acks: Vec<Ack>,
 }
-fn commit_req(domain: &str, body: &CommitReq) -> Result<CommitResp, Box<dyn Error>> {
+async fn commit_req(domain: &str, body: &CommitReq) -> Result<CommitResp, Box<dyn Error>> {
     let url = format!("{}/commit", domain);
-    let client = reqwest::blocking::Client::new();
-    let body_str = serde_json::to_string(body)?;
-    let response = client.post(&url).body(body_str).send()?;
-    let response_text = response.text()?;
+    let client = Client::new();
+    let response = client.post(&url).json(body).send().await?;
+    let response_text = response.text().await?;
     let resp: CommitResp = serde_json::from_str(&response_text)?;
     Ok(resp)
 }
@@ -247,12 +256,14 @@ fn commit_req(domain: &str, body: &CommitReq) -> Result<CommitResp, Box<dyn Erro
 struct FinalizeResp {
     is_success: bool,
 }
-fn finalize_dkg_req(domain: &str, body: &FinalizeReq) -> Result<FinalizeResp, Box<dyn Error>> {
+async fn finalize_dkg_req(
+    domain: &str,
+    body: &FinalizeReq,
+) -> Result<FinalizeResp, Box<dyn Error>> {
     let url = format!("{}/finalize_dkg", domain);
-    let client = reqwest::blocking::Client::new();
-    let body_str = serde_json::to_string(body)?;
-    let response = client.post(&url).body(body_str).send()?;
-    let response_text = response.text()?;
+    let client = Client::new();
+    let response = client.post(&url).json(body).send().await?;
+    let response_text = response.text().await?;
     let resp: FinalizeResp = serde_json::from_str(&response_text)?;
     Ok(resp)
 }
