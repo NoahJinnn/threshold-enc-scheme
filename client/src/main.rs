@@ -96,8 +96,6 @@ async fn init_dkg(State(db): State<Db>) -> impl IntoResponse {
         SyncKeyGen::new(1, sk.clone(), pub_keys.clone(), threshold, &mut rng)
             .unwrap_or_else(|_| panic!("Failed to create `SyncKeyGen` instance for node #{}", 1));
     let p1_part = opt_part.unwrap().clone();
-    println!("opt_part: {:?}", p1_part);
-    println!("p0_part: {:?}", dkg_init_resp.p0_part.clone());
     let parts = vec![dkg_init_resp.p0_part, p1_part];
 
     let acks = vec![];
@@ -126,7 +124,6 @@ async fn commit(State(db): State<Db>) -> impl IntoResponse {
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
     let mut p1_acks = vec![];
-    println!("parts: {:?}", parts);
     for (id, part) in parts.clone().iter().enumerate() {
         // We only have 2 participants
         match node
@@ -234,7 +231,6 @@ async fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Bo
     let client: Client = Client::new();
     let response = client.post(&url).json(body).send().await?;
     let response_text = response.text().await?;
-    println!("response_text: {:?}", response_text);
     let resp: InitDkgResp = serde_json::from_str(&response_text)?;
     Ok(resp)
 }
