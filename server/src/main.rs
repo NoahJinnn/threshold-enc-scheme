@@ -7,14 +7,14 @@ use axum::{
 use axum_macros::debug_handler;
 use dkg::{Ack, AckOutcome, Part, PartOutcome, PubKeyMap, SyncKeyGen};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use std::{
     collections::{BTreeMap, HashMap},
     net::SocketAddr,
     sync::{Arc, RwLock},
     time::Duration,
 };
-use threshold_crypto::{SecretKey, PublicKeyShare};
+use threshold_crypto::{PublicKeyShare, SecretKey, SignatureShare};
+use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 
@@ -31,8 +31,8 @@ struct Session {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-    .with_max_level(tracing::Level::DEBUG)
-    .init();
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     let db = Db::default();
 
@@ -134,19 +134,19 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
 
     for (id, part) in parts.clone().iter().enumerate() {
         // We only have 2 participants
-            match node
-                .handle_part(&id, part.clone(), &mut rng)
-                .expect("Failed to handle Part")
-            {
-                PartOutcome::Valid(Some(ack)) => acks.push(ack),
-                PartOutcome::Invalid(fault) => panic!(
-                    "Node #0 handles Part from node #{} and detects a fault: {:?}",
-                    id, fault
-                ),
-                PartOutcome::Valid(None) => {
-                    panic!("We are not an observer, so we should send Ack.")
-                }
+        match node
+            .handle_part(&id, part.clone(), &mut rng)
+            .expect("Failed to handle Part")
+        {
+            PartOutcome::Valid(Some(ack)) => acks.push(ack),
+            PartOutcome::Invalid(fault) => panic!(
+                "Node #0 handles Part from node #{} and detects a fault: {:?}",
+                id, fault
+            ),
+            PartOutcome::Valid(None) => {
+                panic!("We are not an observer, so we should send Ack.")
             }
+        }
     }
 
     for ack in req_body.p1_acks.into_iter() {
@@ -166,17 +166,20 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
     Json(resp)
 }
 
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinalizeReq {
-    pks_1: PublicKeyShare
+    sig_share_1: SignatureShare,
+    signed_msg_1: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinalizeResp {
-    is_success: bool
+    is_success: bool,
 }
-async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -> impl IntoResponse {
+async fn finalize_dkg(
+    State(db): State<Db>,
+    Json(req_body): Json<FinalizeReq>,
+) -> impl IntoResponse {
     println!("req_body {:?}", req_body);
     let session = db.read().unwrap().get(&0).cloned().unwrap();
     let arc_node = session.node.clone();
@@ -203,14 +206,17 @@ async fn finalize_dkg(State(db): State<Db>, Json(req_body): Json<FinalizeReq>) -
         panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #0")
     });
     assert_eq!(pks, pub_key_set); // All nodes now know the public keys and public key shares.
-    let msg = "Sign this";
+    
     let sks_0 = opt_sks.expect("Not an observer node: We receive a secret key share.");
-    let sig_share = sks_0.sign(msg);
-    let pks_0 = pub_key_set.public_key_share(0);
-    let pks_1 = req_body.pks_1;
-    let is_success_pks_0 = pks_0.verify(&sig_share, msg);
-    let is_success_pks_1 = pks_1.verify(&sig_share, msg);
-    let is_success = is_success_pks_0 && is_success_pks_1;
+    let sig_share_0 = sks_0.sign(req_body.signed_msg_1.clone());
+    let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
+    sig_shares.insert(0, sig_share_0);
+    sig_shares.insert(1, req_body.sig_share_1);
+    let combine_sig = pub_key_set
+        .combine_signatures(&sig_shares)
+        .expect("The shares can be combined.");
+
+    let is_success = pub_key_set.public_key().verify(&combine_sig, req_body.signed_msg_1);
     println!("is_success {:?}", is_success);
     Json(FinalizeResp { is_success })
 }

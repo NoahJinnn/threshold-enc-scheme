@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use threshold_crypto::{PublicKeyShare, SecretKey};
+use threshold_crypto::{PublicKeyShare, SecretKey, SignatureShare};
 use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
@@ -177,7 +177,8 @@ async fn commit(State(db): State<Db>) -> impl IntoResponse {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinalizeReq {
-    pks_1: PublicKeyShare,
+    sig_share_1: SignatureShare,
+    signed_msg_1: String,
 }
 
 async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
@@ -202,16 +203,19 @@ async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
         .expect("Failed to create `PublicKeySet` from node #1")
         .0;
     assert!(node.is_ready());
-    let (pks, _) = node.generate().unwrap_or_else(|_| {
+    let (pks, opt_sks) = node.generate().unwrap_or_else(|_| {
         panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #1")
     });
     assert_eq!(pks, pub_key_set); // All nodes now know the public keys and public key shares.
 
-    let pks_1 = pub_key_set.public_key_share(1);
+    let sks_1 = opt_sks.expect("Not an observer node: We receive a secret key share.");
+    let msg = "Sign this";
+    let sig_share_1 = sks_1.sign(msg);
 
     // Send req to server
     let req_body = FinalizeReq {
-        pks_1: pks_1.clone(),
+        sig_share_1,
+        signed_msg_1: msg.to_string(),
     };
     let is_success = finalize_dkg_req("http://127.0.0.1:3000", &req_body)
         .await

@@ -617,6 +617,5 @@ mod test {
             .map_err(|_| ());
         assert!(result.is_ok());
         assert_eq!(msg_2, result.unwrap().as_slice());
-        
     }
 }
