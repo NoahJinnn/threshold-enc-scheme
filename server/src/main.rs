@@ -1,4 +1,5 @@
 pub mod dkg;
+pub mod ted;
 use axum::{
     error_handling::HandleErrorLayer, extract::State, http::StatusCode, response::IntoResponse,
     routing::post, Json, Router,

@@ -166,9 +166,9 @@ impl ProposalState {
         }
     }
 
-    /// Returns `true` if at least `2 * threshold + 1` nodes have acked.
+    /// Returns `true` if at least `threshold + 1` nodes have acked.
     fn is_complete(&self, threshold: usize) -> bool {
-        self.acks.len() > 2 * threshold
+        self.acks.len() > threshold
     }
 }
 
@@ -481,17 +481,15 @@ pub enum PartFault {
 mod test {
     use super::{to_pub_keys, AckOutcome, PartOutcome, SyncKeyGen};
     use std::collections::BTreeMap;
-    use rand::RngCore;
     use threshold_crypto::{SecretKey, SignatureShare};
 
     #[test]
     fn test_all() {
         // Use the OS random number generator for any randomness:
         // let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
-        
 
         // Two out of four shares will suffice to sign or encrypt something.
-        let (threshold, node_num) = (0, 2);
+        let (threshold, node_num) = (1, 2);
 
         // Generate individual key pairs for encryption. These are not suitable for threshold schemes.
         let sec_keys: Vec<SecretKey> = (0..node_num).map(|_| rand::random()).collect();
@@ -503,10 +501,10 @@ mod test {
         let mut parts = Vec::new();
         let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
         for (id, sk) in sec_keys.into_iter().enumerate() {
-            let (sync_key_gen, opt_part) = SyncKeyGen::new(id, sk, pub_keys.clone(), threshold, &mut rng)
-                .unwrap_or_else(|_| {
-                    panic!("Failed to create `SyncKeyGen` instance for node #{}", id)
-                });
+            let (sync_key_gen, opt_part) =
+                SyncKeyGen::new(id, sk, pub_keys.clone(), threshold, &mut rng).unwrap_or_else(
+                    |_| panic!("Failed to create `SyncKeyGen` instance for node #{}", id),
+                );
             nodes.insert(id, sync_key_gen);
             parts.push((id, opt_part.unwrap())); // Would be `None` for observer nodes.
         }
@@ -567,31 +565,55 @@ mod test {
             secret_key_shares.insert(id, sks);
         }
 
-        // Two out of four nodes can now sign a message. Each share can be verified individually.
-        let msg = "Nodes 0 does not agree with this.";
-        let msg_1 = "Nodes 1 does not agree with this.";
-        // let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
-        // for (&id, sks) in &secret_key_shares {
-        //     println!("Node #{} signs the message.", id);
-        //     let sig_share = sks.sign(msg);
-        //     let pks = pub_key_set.public_key_share(id);
-        //     assert!(pks.verify(&sig_share, msg));
-        //     sig_shares.insert(id, sig_share);
-        // }
-
         let pks_0 = pub_key_set.public_key_share(0);
+        let pks_1 = pub_key_set.public_key_share(1);
         let sks_0 = secret_key_shares.get(&0).unwrap();
         let sks_1 = secret_key_shares.get(&1).unwrap();
+
+        // --- Threshold Signature Scheme
+        // Two out of 2 nodes can now sign a message. Each share can be verified individually.
+        let msg = "Nodes 0 does not agree with this.";
+        let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
         let sig_share0 = sks_0.sign(msg);
-        let sig_share1 = sks_1.sign(msg_1);
+        let sig_share1 = sks_1.sign(msg);
         assert!(pks_0.verify(&sig_share0, msg));
-        assert!(pks_0.verify(&sig_share1, msg_1));
+        assert!(pks_1.verify(&sig_share1, msg));
+        sig_shares.insert(0, sig_share0);
+        sig_shares.insert(1, sig_share1);
 
         // Two signatures are over the threshold. They are enough to produce a signature that matches
         // the public master key.
-        // let sig = pub_key_set
-        //     .combine_signatures(&sig_shares)
-        //     .expect("The shares can be combined.");
-        // assert!(pub_key_set.public_key().verify(&sig, msg));
+        let sig = pub_key_set
+            .combine_signatures(&sig_shares)
+            .expect("The shares can be combined.");
+        assert!(pub_key_set.public_key().verify(&sig, msg));
+
+
+        // --- Threshold Encryption Scheme
+        let msg_2 = b"encrypt me now";
+        let ciphertext = pub_key_set.public_key().encrypt(msg_2);
+        let mut dec_shares = BTreeMap::new();
+        
+        let dec_share_0 = sks_0.decrypt_share(&ciphertext).unwrap();
+        let dec_share_0_is_valid = pks_0.verify_decryption_share(&dec_share_0, &ciphertext);
+        assert!(dec_share_0_is_valid);
+        dec_shares.insert(0, dec_share_0);
+
+        let result = pub_key_set
+            .decrypt(&dec_shares, &ciphertext)
+            .map_err(|_| ());
+        assert!(result.is_err());
+
+        let dec_share_1 = sks_1.decrypt_share(&ciphertext).unwrap();
+        let dec_share_1_is_valid = pks_1.verify_decryption_share(&dec_share_1, &ciphertext);
+        assert!(dec_share_1_is_valid);
+        dec_shares.insert(1, dec_share_1);
+
+        let result = pub_key_set
+            .decrypt(&dec_shares, &ciphertext)
+            .map_err(|_| ());
+        assert!(result.is_ok());
+        assert_eq!(msg_2, result.unwrap().as_slice());
+        
     }
 }
