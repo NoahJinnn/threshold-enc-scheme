@@ -579,14 +579,17 @@ mod test {
         assert!(pks_0.verify(&sig_share0, msg));
         assert!(pks_1.verify(&sig_share1, msg));
         sig_shares.insert(0, sig_share0);
-        sig_shares.insert(1, sig_share1);
-
         // Two signatures are over the threshold. They are enough to produce a signature that matches
         // the public master key.
         let sig = pub_key_set
-            .combine_signatures(&sig_shares)
-            .expect("The shares can be combined.");
-        assert!(pub_key_set.public_key().verify(&sig, msg));
+            .combine_signatures(&sig_shares);
+        assert!(sig.is_err());
+        sig_shares.insert(1, sig_share1);
+        let sig = pub_key_set
+            .combine_signatures(&sig_shares);
+        assert!(sig.is_ok());
+        let combine_sig = sig.expect("The shares can be combined.");
+        assert!(pub_key_set.public_key().verify(&combine_sig, msg));
 
 
         // --- Threshold Encryption Scheme

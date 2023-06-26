@@ -168,7 +168,7 @@ mod test {
         // to decrypt the ciphertext, they succeed because the society requires two or more actors for
         // decryption.
         meeting.accept_decryption_share(society.get_actor(bob));
-        let mut res = meeting.decrypt_message();
+        let res = meeting.decrypt_message();
         assert!(res.is_ok());
         assert_eq!(msg, res.unwrap().as_slice());
 
