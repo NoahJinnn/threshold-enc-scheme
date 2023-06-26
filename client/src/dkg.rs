@@ -166,9 +166,9 @@ impl ProposalState {
         }
     }
 
-    /// Returns `true` if at least `2 * threshold + 1` nodes have acked.
+    /// Returns `true` if at least `threshold + 1` nodes have acked.
     fn is_complete(&self, threshold: usize) -> bool {
-        self.acks.len() > 2 * threshold
+        self.acks.len() > threshold
     }
 }
 
