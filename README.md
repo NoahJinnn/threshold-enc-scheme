@@ -34,6 +34,7 @@ This scheme has 3 routes:
   - send back server publickey `p0_pk` + server part `p0_part` to client so that client can create its `sync_key_gen`
 
 => `server`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_0`, `p0_part`
+
 => `client`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_1`, `p0_part`, `p1_part`
 
 2 /commit: 
@@ -45,6 +46,7 @@ This scheme has 3 routes:
   - send its `p0_acks` list to client. Now both parties has all `ack` result of communication
 
 => `server`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_0`, `p0_part`, `p1_part`, `p0_acks`, `p1_acks`
+
 => `client`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_1`, `p0_part`, `p1_part`, `p0_acks`, `p1_acks`
 
 3 /finalize:
@@ -59,6 +61,7 @@ This scheme has 3 routes:
   -  send back the status of verifying
 
 => `server`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_0`, `p0_part`, `p1_part`, `p0_acks`, `p1_acks`, `signed message`, `pks0`, `sks0`, `signature_share_0`, `signature_share_1`
+
 => `client`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_1`, `p0_part`, `p1_part`, `p0_acks`, `p1_acks`, `signed message`, `pks1`, `sks1`,  `signature_share_1`
 
 Usage:
