@@ -13,7 +13,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
-use threshold_crypto::{PublicKeyShare, SecretKey, SignatureShare};
+use threshold_crypto::{SecretKey, SignatureShare};
 use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
