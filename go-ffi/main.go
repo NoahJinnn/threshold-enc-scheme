@@ -23,5 +23,7 @@ func main() {
 	}
 	input := C.CString(jsonString)
 
-	C.initdkg(input)
+	o := C.initdkg(input)
+	output := C.GoString(o)
+	fmt.Printf("Second time %s\n", output)
 }
