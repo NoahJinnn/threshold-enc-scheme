@@ -20,7 +20,7 @@ use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
-
+const SERVER_URL: &str = "http://127.0.0.1:3000";
 #[derive(Debug, Clone)]
 struct Session {
     sk: SecretKey,
@@ -73,32 +73,47 @@ async fn main() {
 struct InitDkgReq {
     p1_pk: threshold_crypto::PublicKey,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct InitDkgResp {
+    p0_pk: threshold_crypto::PublicKey,
+    p0_part: Part,
+}
+
 #[debug_handler]
 async fn init_dkg(State(db): State<Db>) -> impl IntoResponse {
-    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
-    let threshold = 0;
+    // Create public key with random secret
     let sk: SecretKey = rand::random();
     let p1_pk = sk.public_key();
-    let mut map = BTreeMap::new();
 
-    // // Send req to server
+    // Body req to server
     let req_body = InitDkgReq {
         p1_pk: p1_pk.clone(),
     };
-    let dkg_init_resp: InitDkgResp = init_dkg_req("http://127.0.0.1:3000", &req_body)
+
+    // Server returns its public key and part
+    let dkg_init_resp: InitDkgResp = init_dkg_req(SERVER_URL, &req_body)
         .await
         .unwrap();
 
+    // Create a map of public keys
+    let mut map = BTreeMap::new();
     map.insert(0, dkg_init_resp.p0_pk);
     map.insert(1, p1_pk.clone());
+
+    // Create SyncKeyGen instance
     let pub_keys: PubKeyMap<usize, threshold_crypto::PublicKey> = Arc::new(map);
+    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+    let threshold = 0;
     let (sync_key_gen, opt_part) =
         SyncKeyGen::new(1, sk.clone(), pub_keys.clone(), threshold, &mut rng)
             .unwrap_or_else(|_| panic!("Failed to create `SyncKeyGen` instance for node #{}", 1));
+
+    // Create list of parts and acks, pr
     let p1_part = opt_part.unwrap().clone();
     let parts = vec![dkg_init_resp.p0_part, p1_part];
-
     let acks = vec![];
+
     let session = Session {
         sk,
         node: Arc::new(Mutex::new(sync_key_gen)),
@@ -115,15 +130,22 @@ struct CommitReq {
     p1_part: Part,
     p1_acks: Vec<Ack>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct CommitResp {
+    p0_acks: Vec<Ack>,
+}
+
 #[debug_handler]
 async fn commit(State(db): State<Db>) -> impl IntoResponse {
     let session = db.read().unwrap().get(&0).cloned().unwrap();
-    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
 
     let parts = session.parts;
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
     let mut p1_acks = vec![];
+
+    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
     for (id, part) in parts.clone().iter().enumerate() {
         // We only have 2 participants
         match node
@@ -151,7 +173,7 @@ async fn commit(State(db): State<Db>) -> impl IntoResponse {
         p1_part: parts[1].clone(),
         p1_acks: p1_acks.clone(),
     };
-    let commit_resp: CommitResp = commit_req("http://127.0.0.1:3000", &req_body)
+    let commit_resp: CommitResp = commit_req(SERVER_URL, &req_body)
         .await
         .unwrap();
     let p0_acks = commit_resp.p0_acks;
@@ -181,12 +203,18 @@ struct FinalizeReq {
     signed_msg_1: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct FinalizeResp {
+    is_success: bool,
+}
+
 async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
     let session = db.read().unwrap().get(&0).cloned().unwrap();
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
     let acks = session.acks;
-    // Finally, we handle all the `Ack`s.
+
+    // we handle all the `Ack`s.
     for ack in acks {
         for id in 0..1 {
             match node
@@ -198,11 +226,13 @@ async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
             }
         }
     }
+
     let pub_key_set = node
         .generate()
         .expect("Failed to create `PublicKeySet` from node #1")
         .0;
     assert!(node.is_ready());
+
     let (pks, opt_sks) = node.generate().unwrap_or_else(|_| {
         panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #1")
     });
@@ -217,17 +247,11 @@ async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
         sig_share_1,
         signed_msg_1: msg.to_string(),
     };
-    let is_success = finalize_dkg_req("http://127.0.0.1:3000", &req_body)
+    let is_success = finalize_dkg_req(SERVER_URL, &req_body)
         .await
         .unwrap();
     println!("is_success: {:?}", is_success);
     Json(())
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct InitDkgResp {
-    p0_pk: threshold_crypto::PublicKey,
-    p0_part: Part,
 }
 
 async fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Box<dyn Error>> {
@@ -239,10 +263,6 @@ async fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Bo
     Ok(resp)
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct CommitResp {
-    p0_acks: Vec<Ack>,
-}
 async fn commit_req(domain: &str, body: &CommitReq) -> Result<CommitResp, Box<dyn Error>> {
     let url = format!("{}/commit", domain);
     let client = Client::new();
@@ -252,10 +272,6 @@ async fn commit_req(domain: &str, body: &CommitReq) -> Result<CommitResp, Box<dy
     Ok(resp)
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct FinalizeResp {
-    is_success: bool,
-}
 async fn finalize_dkg_req(
     domain: &str,
     body: &FinalizeReq,

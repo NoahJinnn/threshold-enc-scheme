@@ -1,5 +1,4 @@
 pub mod dkg;
-pub mod ted;
 use axum::{
     error_handling::HandleErrorLayer, extract::State, http::StatusCode, response::IntoResponse,
     routing::post, Json, Router,
@@ -80,31 +79,37 @@ struct InitDkgResp {
 #[debug_handler]
 async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> impl IntoResponse {
     println!("req_body {:?}", req_body);
-    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
-    let threshold = 0;
+    // Create public key with random secret
     let sk: SecretKey = rand::random();
     let p0_pk = sk.public_key();
+
+    // Get client public key from request body, create a map of public keys
     let mut map = BTreeMap::new();
     map.insert(0, p0_pk.clone());
     map.insert(1, req_body.p1_pk.clone());
     let pub_keys: PubKeyMap<usize, threshold_crypto::PublicKey> = Arc::new(map);
+
+     // Create SyncKeyGen instance
+    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+    let threshold = 0;
     let (sync_key_gen, opt_part) =
         SyncKeyGen::new(0, sk.clone(), pub_keys.clone(), threshold, &mut rng)
             .unwrap_or_else(|_| panic!("Failed to create `SyncKeyGen` instance for node #{}", 0));
+    
     let parts = vec![opt_part.unwrap().clone()];
-    let resp = InitDkgResp {
-        p0_pk: p0_pk.clone(),
-        p0_part: parts[0].clone(),
-    };
     let acks = vec![];
     let session = Session {
         sk,
         node: Arc::new(Mutex::new(sync_key_gen)),
-        parts,
+        parts: parts.clone(),
         acks,
     };
     db.write().unwrap().insert(0, session);
-
+    
+    let resp = InitDkgResp {
+        p0_pk: p0_pk.clone(),
+        p0_part: parts[0].clone(),
+    };
     Json(resp)
 }
 
@@ -185,7 +190,8 @@ async fn finalize_dkg(
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
     let acks = session.acks;
-    // Finally, we handle all the `Ack`s.
+    
+    // we handle all the `Ack`s.
     for ack in acks {
         for id in 0..1 {
             match node
@@ -197,11 +203,13 @@ async fn finalize_dkg(
             }
         }
     }
+
     let pub_key_set = node
         .generate()
         .expect("Failed to create `PublicKeySet` from node #0")
         .0;
     assert!(node.is_ready());
+    
     let (pks, opt_sks) = node.generate().unwrap_or_else(|_| {
         panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #0")
     });
@@ -218,5 +226,6 @@ async fn finalize_dkg(
 
     let is_success = pub_key_set.public_key().verify(&combine_sig, req_body.signed_msg_1);
     println!("is_success {:?}", is_success);
+    
     Json(FinalizeResp { is_success })
 }
