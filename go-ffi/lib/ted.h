@@ -1,3 +1,2 @@
-void hello(const char *name);
-void whisper(const char *message);
+char *initdkg(const char *c_init_dkg_json);
 
