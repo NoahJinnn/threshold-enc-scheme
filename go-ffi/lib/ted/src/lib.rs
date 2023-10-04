@@ -42,7 +42,7 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
     // Get client public key from request body, create a map of public keys
     let mut map = BTreeMap::new();
     map.insert(0, p0_pk.clone());
-    map.insert(1, req_body.p1_pk.clone());
+    map.insert(1, req_body.p1_pk);
     let pub_keys: PubKeyMap<usize, threshold_crypto::PublicKey> = Arc::new(map);
 
     // Create SyncKeyGen instance
@@ -64,7 +64,7 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
     // db.write().unwrap().insert(0, session);
 
     let resp = InitDkgResp {
-        p0_pk: p0_pk.clone(),
+        p0_pk,
         p0_part: parts[0].clone(),
     };
     Ok(resp)
@@ -72,9 +72,8 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
 
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn initdkg(c_init_dkg_json: *const c_char) -> *mut c_char {
-
-    let init_dkg_json = match get_str_from_c_char(c_init_dkg_json, "master_key_json") {
+pub extern "C" fn init(c_init_dkg_json: *const c_char) -> *mut c_char {
+    let init_dkg_json = match get_str_from_c_char(c_init_dkg_json, "init_dkg_json") {
         Ok(s) => s,
         Err(e) => return error_to_c_string(e),
     };
@@ -103,18 +102,77 @@ pub extern "C" fn initdkg(c_init_dkg_json: *const c_char) -> *mut c_char {
         Ok(share) => share,
         Err(e) => {
             return error_to_c_string(ErrorFFIKind::E103 {
-                msg: "signature_json".to_owned(),
+                msg: "dkg_resp_json".to_owned(),
                 e: e.to_string(),
             })
         }
     };
 
     println!("init_dkg_resp_json {:?}", init_dkg_resp_json);
-
     CString::new(init_dkg_resp_json).unwrap().into_raw()
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct CommitReq {
+    p1_part: Part,
+    p1_acks: Vec<Ack>,
+}
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct CommitResp {
+    p0_acks: Vec<Ack>,
+}
+
+fn commit_dkg(req_body: CommitReq) -> Result<CommitResp> {
+    println!("req_body {:?}", req_body);
+    let session = db.read().unwrap().get(&0).cloned().unwrap();
+    let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
+
+    let mut parts = session.parts;
+    parts.insert(1, req_body.p1_part.clone());
+
+    let arc_node = session.node.clone();
+    let mut node = arc_node.try_lock().unwrap();
+
+    let mut acks = vec![];
+
+    for (id, part) in parts.clone().iter().enumerate() {
+        // We only have 2 participants
+        match node
+            .handle_part(&id, part.clone(), &mut rng)
+            .expect("Failed to handle Part")
+        {
+            PartOutcome::Valid(Some(ack)) => acks.push(ack),
+            PartOutcome::Invalid(fault) => panic!(
+                "Node #0 handles Part from node #{} and detects a fault: {:?}",
+                id, fault
+            ),
+            PartOutcome::Valid(None) => {
+                panic!("We are not an observer, so we should send Ack.")
+            }
+        }
+    }
+
+    for ack in req_body.p1_acks.into_iter() {
+        acks.push(ack);
+    }
+    let resp_acks = acks.clone();
+
+    let updated_session = Session {
+        sk: session.sk,
+        node: session.node,
+        parts,
+        acks,
+    };
+    // db.write().unwrap().insert(0, updated_session);
+    let resp = CommitResp { p0_acks: resp_acks };
+    println!("resp {:?}", resp);
+    Ok(resp)
+}
+
+fn commit(c_commit_json: *const c_char) -> *mut c_char {
+    
+}
 
 pub fn get_str_from_c_char(c: *const c_char, err_msg: &str) -> Result<String, ErrorFFIKind> {
     let raw = unsafe { CStr::from_ptr(c) };
@@ -130,20 +188,6 @@ pub fn get_str_from_c_char(c: *const c_char, err_msg: &str) -> Result<String, Er
 
     Ok(s.to_string())
 }
-// #[no_mangle]
-// pub extern "C" fn hello(name: *const c_char) {
-//     let name_cstr = unsafe { CStr::from_ptr(name) };
-//     let name = name_cstr.to_str().unwrap();
-//     println!("Hello {}!", name);
-// }
-
-// #[no_mangle]
-// pub extern "C" fn whisper(message: *const c_char) {
-//     let message_cstr = unsafe { CStr::from_ptr(message) };
-//     let message = message_cstr.to_str().unwrap();
-//     println!("({})", message);
-// }
-
 
 
 // This is present so it's easy to test that the code works natively in Rust via `cargo test`
@@ -156,7 +200,6 @@ pub mod test {
     // This is meant to do the same stuff as the main function in the .go files
     #[test]
     fn simulated_main_function() {
-        // hello(CString::new("world").unwrap().into_raw());
         // whisper(CString::new("this is code from Rust").unwrap().into_raw());
     }
 }

@@ -1,2 +1,2 @@
-char *initdkg(const char *c_init_dkg_json);
+char *init(const char *c_init_dkg_json);
 

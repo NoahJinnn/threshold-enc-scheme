@@ -1,0 +1,12 @@
+# Run
+
+```sh
+make run-dynamic
+```
+
+# Generate header file
+
+```sh
+cd lib/ted
+cbindgen . -o ted.h 
+```
