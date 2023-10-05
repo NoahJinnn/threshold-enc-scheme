@@ -20,7 +20,7 @@ use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
-const SERVER_URL: &str = "http://127.0.0.1:3000";
+const SERVER_URL: &str = "http://127.0.0.1:3002";
 #[derive(Debug, Clone)]
 struct Session {
     sk: SecretKey,
@@ -258,8 +258,13 @@ async fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Bo
     let url = format!("{}/init_dkg", domain);
     let client: Client = Client::new();
     let response = client.post(&url).json(body).send().await?;
-    let response_text = response.text().await?;
-    let resp: InitDkgResp = serde_json::from_str(&response_text)?;
+    let resp_byte = response.bytes().await?;
+    let resp_text = String::from_utf8(resp_byte.to_vec())?;
+    let resp: InitDkgResp = serde_json::from_str(&resp_text)?;
+    // let response_text = response.text().await?;
+    // let resp = response.json().await?;
+    // println!("response_text: {:?}", response_text);
+    // let resp: InitDkgResp = serde_json::from_str(&response_text).unwrap();
     Ok(resp)
 }
 
