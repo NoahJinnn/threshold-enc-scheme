@@ -13,7 +13,31 @@ use std::{
     sync::{Arc, RwLock},
 };
 use threshold_crypto::{SecretKey, SignatureShare};
-type Db = Arc<RwLock<HashMap<usize, Session>>>;
+
+#[macro_use]
+extern crate lazy_static;
+
+lazy_static! {
+    static ref HASHMAP: Mutex<HashMap<u32, Session>> = {
+        let m = Mutex::new(HashMap::new());
+        m
+    };
+}
+
+fn insert_m(k: u32, s: Session) {
+    println!("s {:?}", s);
+    let mut m = HASHMAP.try_lock().unwrap().clone();
+    m.insert(k, s);
+    assert_eq!(m.is_empty(), false);
+
+    println!("hashmap {:?}", m);
+}
+
+fn get_m(k: u32) -> Session {
+    let m = HASHMAP.try_lock().unwrap().clone();
+    println!("hashmap {:?}", m);
+    m.get(&k).cloned().unwrap()
+}
 
 #[derive(Debug, Clone)]
 struct Session {
@@ -62,6 +86,7 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
         acks,
     };
     // db.write().unwrap().insert(0, session);
+    insert_m(0, session);
 
     let resp = InitDkgResp {
         p0_pk,
@@ -73,10 +98,13 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn init(c_init_dkg_json: *const c_char) -> *mut c_char {
+
     let init_dkg_json = match get_str_from_c_char(c_init_dkg_json, "init_dkg_json") {
         Ok(s) => s,
         Err(e) => return error_to_c_string(e),
     };
+
+    println!("init_dkg_json {:?}", init_dkg_json);
 
     let init_req: InitDkgReq = match serde_json::from_str(&init_dkg_json) {
         Ok(s) => s,
@@ -108,7 +136,7 @@ pub extern "C" fn init(c_init_dkg_json: *const c_char) -> *mut c_char {
         }
     };
 
-    println!("init_dkg_resp_json {:?}", init_dkg_resp_json);
+    // println!("init_dkg_resp_json {:?}", init_dkg_resp_json);
     CString::new(init_dkg_resp_json).unwrap().into_raw()
 }
 
@@ -125,7 +153,8 @@ struct CommitResp {
 
 fn commit_dkg(req_body: CommitReq) -> Result<CommitResp> {
     println!("req_body {:?}", req_body);
-    let session = db.read().unwrap().get(&0).cloned().unwrap();
+    // let session = db.read().unwrap().get(&0).cloned().unwrap();
+    let session = get_m(0);
     let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
 
     let mut parts = session.parts;
@@ -171,7 +200,43 @@ fn commit_dkg(req_body: CommitReq) -> Result<CommitResp> {
 }
 
 fn commit(c_commit_json: *const c_char) -> *mut c_char {
-    
+    let commit_json = match get_str_from_c_char(c_commit_json, "commit_json") {
+        Ok(s) => s,
+        Err(e) => return error_to_c_string(e),
+    };
+
+    let commit_req: CommitReq = match serde_json::from_str(&commit_json) {
+        Ok(s) => s,
+        Err(e) => {
+            return error_to_c_string(ErrorFFIKind::E104 {
+                msg: "init_dkg".to_owned(),
+                e: e.to_string(),
+            })
+        }
+    };
+
+    let commit_resp = match commit_dkg(commit_req) {
+        Ok(s) => s,
+        Err(e) => {
+            return error_to_c_string(ErrorFFIKind::E103 {
+                msg: "commit_resp".to_owned(),
+                e: e.to_string(),
+            })
+        }
+    };
+
+    let commit_resp_json = match serde_json::to_string(&commit_resp) {
+        Ok(share) => share,
+        Err(e) => {
+            return error_to_c_string(ErrorFFIKind::E103 {
+                msg: "commit_resp_json".to_owned(),
+                e: e.to_string(),
+            })
+        }
+    };
+
+    println!("commit_resp_json {:?}", commit_resp_json);
+    CString::new(commit_resp_json).unwrap().into_raw()
 }
 
 pub fn get_str_from_c_char(c: *const c_char, err_msg: &str) -> Result<String, ErrorFFIKind> {
