@@ -20,7 +20,7 @@ cargo 1.69.0 (6e9a83356 2023-04-12)
 ```
 
 ## DKG
-
+### Terminology
 This scheme has 3 routes:
 
 1 /init: 
@@ -64,7 +64,7 @@ This scheme has 3 routes:
 
 => `client`: a keypair, `p1_pk`, `p0_pk`, `sync_key_gen_1`, `p0_part`, `p1_part`, `p0_acks`, `p1_acks`, `signed message`, `pks1`, `sks1`,  `signature_share_1`
 
-Usage:
+### Usage
 
 Clone this repository
 
@@ -97,8 +97,7 @@ curl --location --request POST 'localhost:3001/commit'
 curl --location --request POST 'localhost:3001/finalize_dkg'
 ```
 
-
-
+### Result
 
 ```sh
 # client
