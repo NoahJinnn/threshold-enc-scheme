@@ -20,7 +20,7 @@ use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
-const SERVER_URL: &str = "http://127.0.0.1:3002";
+const SERVER_URL: &str = "http://127.0.0.1:3000";
 #[derive(Debug, Clone)]
 struct Session {
     sk: SecretKey,
@@ -176,9 +176,10 @@ async fn commit(State(db): State<Db>) -> impl IntoResponse {
     let commit_resp: CommitResp = commit_req(SERVER_URL, &req_body)
         .await
         .unwrap();
-    let p0_acks = commit_resp.p0_acks;
 
+    let p0_acks = commit_resp.p0_acks;
     let mut acks = vec![];
+    // Acks order follows the order of parts, we have 2 acks for each part
     for ack in p0_acks {
         acks.push(ack);
     }
@@ -257,14 +258,9 @@ async fn finalize_dkg(State(db): State<Db>) -> impl IntoResponse {
 async fn init_dkg_req(domain: &str, body: &InitDkgReq) -> Result<InitDkgResp, Box<dyn Error>> {
     let url = format!("{}/init_dkg", domain);
     let client: Client = Client::new();
-    let response = client.post(&url).json(body).send().await?;
-    let resp_byte = response.bytes().await?;
-    let resp_text = String::from_utf8(resp_byte.to_vec())?;
-    let resp: InitDkgResp = serde_json::from_str(&resp_text)?;
-    // let response_text = response.text().await?;
-    // let resp = response.json().await?;
-    // println!("response_text: {:?}", response_text);
-    // let resp: InitDkgResp = serde_json::from_str(&response_text).unwrap();
+    let response = client.post(&url).json(body).send().await.unwrap();
+    let response_text = response.text().await.unwrap();
+    let resp: InitDkgResp = serde_json::from_str(&response_text).unwrap();
     Ok(resp)
 }
 

@@ -18,31 +18,6 @@ use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 
-#[macro_use]
-extern crate lazy_static;
-
-lazy_static! {
-    static ref HASHMAP: Mutex<HashMap<u32, Session>> = {
-        let m = Mutex::new(HashMap::new());
-        m
-    };
-}
-
-fn insert_m(k: u32, s: Session) {
-    println!("s {:?}", s);
-    let mut m = HASHMAP.try_lock().unwrap().clone();
-    m.insert(k, s);
-    assert_eq!(m.is_empty(), false);
-
-    println!("hashmap {:?}", m);
-}
-
-fn get_m(k: u32) -> Session {
-    let m = HASHMAP.try_lock().unwrap().clone();
-    println!("hashmap {:?}", m);
-    m.get(&k).cloned().unwrap()
-}
-
 #[derive(Debug, Clone)]
 struct Session {
     sk: SecretKey,
@@ -52,14 +27,6 @@ struct Session {
 }
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
-
-// #[derive(Debug, Clone)]
-// struct Session {
-//     sk: SecretKey,
-//     node: Arc<Mutex<SyncKeyGen<usize>>>,
-//     parts: Vec<Part>,
-//     acks: Vec<Ack>,
-// }
 
 #[tokio::main]
 async fn main() {
@@ -112,14 +79,7 @@ struct InitDkgResp {
 }
 #[debug_handler]
 async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> impl IntoResponse {
-    let req_body_json = match serde_json::to_string(&req_body) {
-        Ok(share) => share,
-        Err(e) => {
-            println!("Error: {}", e);
-            "".to_string()
-        }
-    };
-    println!("req_body {:?}", req_body_json);
+    print_json(&req_body, "init req body");
 
     // Create public key with random secret
     let sk: SecretKey = rand::random();
@@ -140,7 +100,6 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
 
     let parts = vec![opt_part.unwrap().clone()];
     let acks = vec![];
-    
 
     let session = Session {
         sk,
@@ -150,21 +109,13 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
     };
 
     db.write().unwrap().insert(0, session);
-    // insert_m(0, session);
 
     let resp = InitDkgResp {
         p0_pk: p0_pk.clone(),
         p0_part: parts[0].clone(),
     };
 
-    let resp_json = match serde_json::to_string(&resp) {
-        Ok(share) => share,
-        Err(e) => {
-            println!("Error: {}", e);
-            "".to_string()
-        }
-    };
-    println!("resp {:?}", resp_json);
+    print_json(&resp, "init resp");
     Json(resp)
 }
 
@@ -180,17 +131,9 @@ struct CommitResp {
 }
 
 async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl IntoResponse {
-    let req_body_json = match serde_json::to_string(&req_body) {
-        Ok(share) => share,
-        Err(e) => {
-            println!("Error: {}", e);
-            "".to_string()
-        }
-    };
-    println!("req_body {:?}", req_body_json);
+    print_json(&req_body, "commit req body");
 
     let session = db.read().unwrap().get(&0).cloned().unwrap();
-    // let session = get_m(0);
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
 
@@ -230,17 +173,9 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
     };
 
     db.write().unwrap().insert(0, updated_session);
-    // insert_m(0, updated_session);
 
     let resp = CommitResp { p0_acks: resp_acks };
-    let resp_json = match serde_json::to_string(&resp) {
-        Ok(share) => share,
-        Err(e) => {
-            println!("Error: {}", e);
-            "".to_string()
-        }
-    };
-    println!("resp {:?}", resp_json);
+    print_json(&resp, "commit resp");
     Json(resp)
 }
 
@@ -313,4 +248,18 @@ async fn finalize_dkg(
     println!("is_success {:?}", is_success);
 
     Json(FinalizeResp { is_success })
+}
+
+fn print_json<T>(t: &T, msg: &str)
+where
+    T: serde::Serialize,
+{
+    let json = match serde_json::to_string(&t) {
+        Ok(share) => share,
+        Err(e) => {
+            println!("Error: {}", e);
+            "".to_string()
+        }
+    };
+    println!("{msg} {:?}", json);
 }
