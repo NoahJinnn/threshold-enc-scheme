@@ -104,8 +104,6 @@ pub extern "C" fn init(c_init_dkg_json: *const c_char) -> *mut c_char {
         Err(e) => return error_to_c_string(e),
     };
 
-    println!("init_dkg_json {:?}", init_dkg_json);
-
     let init_req: InitDkgReq = match serde_json::from_str(&init_dkg_json) {
         Ok(s) => s,
         Err(e) => {
@@ -136,7 +134,6 @@ pub extern "C" fn init(c_init_dkg_json: *const c_char) -> *mut c_char {
         }
     };
 
-    // println!("init_dkg_resp_json {:?}", init_dkg_resp_json);
     CString::new(init_dkg_resp_json).unwrap().into_raw()
 }
 
@@ -194,12 +191,15 @@ fn commit_dkg(req_body: CommitReq) -> Result<CommitResp> {
         acks,
     };
     // db.write().unwrap().insert(0, updated_session);
+    insert_m(0, updated_session);
     let resp = CommitResp { p0_acks: resp_acks };
     println!("resp {:?}", resp);
     Ok(resp)
 }
 
-fn commit(c_commit_json: *const c_char) -> *mut c_char {
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn commit(c_commit_json: *const c_char) -> *mut c_char {
     let commit_json = match get_str_from_c_char(c_commit_json, "commit_json") {
         Ok(s) => s,
         Err(e) => return error_to_c_string(e),
@@ -209,7 +209,7 @@ fn commit(c_commit_json: *const c_char) -> *mut c_char {
         Ok(s) => s,
         Err(e) => {
             return error_to_c_string(ErrorFFIKind::E104 {
-                msg: "init_dkg".to_owned(),
+                msg: "commit_dkg".to_owned(),
                 e: e.to_string(),
             })
         }

@@ -16,11 +16,6 @@ import (
 )
 
 func main() {
-	// jsonString := `{"p1_pk":[137,228,198,125,28,60,110,83,86,246,132,115,103,140,234,233,155,39,65,49,0,251,172,228,253,201,213,180,152,13,10,77,255,251,16,173,92,60,76,165,241,76,198,97,122,252,17,104]}`
-	// input := C.CString(jsonString)
-	// o := C.init(input)
-	// output := C.GoString(o)
-	// fmt.Printf("Second time %s\n", output)
 	e := echo.New()
 	// Routes
 	e.POST("/init_dkg", initDkg)
@@ -35,13 +30,8 @@ type InitDkgReq struct {
 }
 
 type InitDkgResp struct {
-	P0Pk   []byte `json:"p0_pk"`
-	P0Part Part   `json:"p0_part"`
-}
-
-type Part struct {
-	Degree int      `json:"degree"`
-	Coeff  [][]byte `json:"coeff"`
+	P0Pk   []uint16      `json:"p0_pk"`
+	P0Part []interface{} `json:"p0_part"`
 }
 
 func initDkg(c echo.Context) error {
@@ -58,22 +48,45 @@ func initDkg(c echo.Context) error {
 
 	respStr := initFfi(string(jsonString))
 
-	// var resp *InitDkgResp
-	// json.Unmarshal([]byte(respStr), &resp)
-	// fmt.Printf("init dkg resp %v\n", resp)
 	var resp InitDkgResp
 	if err := json.Unmarshal([]byte(respStr), &resp); err != nil {
 		fmt.Printf("%v", err)
 		return err
 	}
-	fmt.Printf("init dkg resp %v\n", respStr)
 
 	return c.JSON(http.StatusOK, resp)
 }
 
+type CommitDkgReq struct {
+	P1Acks [][]interface{} `json:"p1_acks"`
+	P1Part []interface{}   `json:"p1_part"`
+}
+
+type CommitDkgResp struct {
+	P0Acks [][]interface{} `json:"p0_acks"`
+}
+
 func commit(c echo.Context) error {
-	// Handle commit route
-	return c.String(http.StatusOK, "commit")
+	var body interface{}
+	if err := (&echo.DefaultBinder{}).BindBody(c, &body); err != nil {
+		return err
+	}
+	jsonString, err := json.Marshal(body)
+	if err != nil {
+		fmt.Printf("%v", err)
+		return err
+	}
+	fmt.Printf("init dkg req %v\n", string(jsonString))
+
+	respStr := commitFfi(string(jsonString))
+
+	var resp interface{}
+	if err := json.Unmarshal([]byte(respStr), &resp); err != nil {
+		fmt.Printf("%v", err)
+		return err
+	}
+
+	return c.JSON(http.StatusOK, resp)
 }
 
 func finalizeDkg(c echo.Context) error {
@@ -85,6 +98,14 @@ func initFfi(jsonString string) string {
 	input := C.CString(jsonString)
 	o := C.init(input)
 	output := C.GoString(o)
-	fmt.Printf("ffi output %s\n", output)
+	fmt.Printf("init ffi output %s\n", output)
+	return output
+}
+
+func commitFfi(jsonString string) string {
+	input := C.CString(jsonString)
+	o := C.commit(input)
+	output := C.GoString(o)
+	fmt.Printf("commit ffi output %s\n", output)
 	return output
 }
