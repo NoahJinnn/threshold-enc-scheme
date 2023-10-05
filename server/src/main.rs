@@ -140,12 +140,7 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
 
     let parts = vec![opt_part.unwrap().clone()];
     let acks = vec![];
-    // let session = Session {
-    //     sk,
-    //     node: Arc::new(Mutex::new(sync_key_gen)),
-    //     parts: parts.clone(),
-    //     acks,
-    // };
+    
 
     let session = Session {
         sk,
@@ -154,14 +149,22 @@ async fn init_dkg(State(db): State<Db>, Json(req_body): Json<InitDkgReq>) -> imp
         acks,
     };
 
-    // db.write().unwrap().insert(0, session);
-    insert_m(0, session);
+    db.write().unwrap().insert(0, session);
+    // insert_m(0, session);
 
     let resp = InitDkgResp {
         p0_pk: p0_pk.clone(),
         p0_part: parts[0].clone(),
     };
-    println!("resp {:?}", resp);
+
+    let resp_json = match serde_json::to_string(&resp) {
+        Ok(share) => share,
+        Err(e) => {
+            println!("Error: {}", e);
+            "".to_string()
+        }
+    };
+    println!("resp {:?}", resp_json);
     Json(resp)
 }
 
@@ -177,11 +180,18 @@ struct CommitResp {
 }
 
 async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl IntoResponse {
-    println!("req_body {:?}", req_body);
-    // let session = db.read().unwrap().get(&0).cloned().unwrap();
-    let session = get_m(0);
+    let req_body_json = match serde_json::to_string(&req_body) {
+        Ok(share) => share,
+        Err(e) => {
+            println!("Error: {}", e);
+            "".to_string()
+        }
+    };
+    println!("req_body {:?}", req_body_json);
+
+    let session = db.read().unwrap().get(&0).cloned().unwrap();
+    // let session = get_m(0);
     let arc_node = session.node.clone();
-    // let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
 
     let mut parts = session.parts.clone();
@@ -219,11 +229,18 @@ async fn commit(State(db): State<Db>, Json(req_body): Json<CommitReq>) -> impl I
         acks,
     };
 
-    // db.write().unwrap().insert(0, updated_session);
-    insert_m(0, updated_session);
+    db.write().unwrap().insert(0, updated_session);
+    // insert_m(0, updated_session);
 
     let resp = CommitResp { p0_acks: resp_acks };
-    println!("resp {:?}", resp);
+    let resp_json = match serde_json::to_string(&resp) {
+        Ok(share) => share,
+        Err(e) => {
+            println!("Error: {}", e);
+            "".to_string()
+        }
+    };
+    println!("resp {:?}", resp_json);
     Json(resp)
 }
 
@@ -241,10 +258,17 @@ async fn finalize_dkg(
     State(db): State<Db>,
     Json(req_body): Json<FinalizeReq>,
 ) -> impl IntoResponse {
-    println!("req_body {:?}", req_body);
+    let req_body_json = match serde_json::to_string(&req_body) {
+        Ok(share) => share,
+        Err(e) => {
+            println!("Error: {}", e);
+            "".to_string()
+        }
+    };
+    println!("req_body {:?}", req_body_json);
 
-    // let session = db.read().unwrap().get(&0).cloned().unwrap();
-    let session = get_m(0);
+    let session = db.read().unwrap().get(&0).cloned().unwrap();
+    // let session = get_m(0);
 
     let arc_node = session.node.clone();
     let mut node = arc_node.try_lock().unwrap();
