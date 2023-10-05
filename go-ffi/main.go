@@ -5,12 +5,15 @@ package main
 /*
 #cgo LDFLAGS: -L./lib -lted
 #include "./lib/ted.h"
+#include <stdio.h>
+#include <stdlib.h>
 */
 import "C"
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"unsafe"
 
 	"github.com/labstack/echo/v4"
 )
@@ -96,6 +99,7 @@ func finalizeDkg(c echo.Context) error {
 
 func initFfi(jsonString string) string {
 	input := C.CString(jsonString)
+	defer C.free(unsafe.Pointer(input))
 	o := C.init(input)
 	output := C.GoString(o)
 	fmt.Printf("init ffi output %s\n", output)
@@ -104,6 +108,7 @@ func initFfi(jsonString string) string {
 
 func commitFfi(jsonString string) string {
 	input := C.CString(jsonString)
+	defer C.free(unsafe.Pointer(input))
 	o := C.commit(input)
 	output := C.GoString(o)
 	fmt.Printf("commit ffi output %s\n", output)
@@ -112,6 +117,7 @@ func commitFfi(jsonString string) string {
 
 func finalizeFfi(jsonString string) string {
 	input := C.CString(jsonString)
+	defer C.free(unsafe.Pointer(input))
 	o := C.finalize(input)
 	output := C.GoString(o)
 	fmt.Printf("finalize ffi output %s\n", output)
