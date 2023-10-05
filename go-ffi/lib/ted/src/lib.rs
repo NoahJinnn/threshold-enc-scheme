@@ -14,29 +14,31 @@ use std::{
 };
 use threshold_crypto::{SecretKey, SignatureShare};
 
-#[macro_use]
-extern crate lazy_static;
+static mut APP_STATE: AppState = AppState { session_map: None };
 
-lazy_static! {
-    static ref HASHMAP: Mutex<HashMap<u32, Session>> = {
-        let m = Mutex::new(HashMap::new());
-        m
-    };
+struct AppState {
+    session_map: Option<HashMap<u32, Session>>,
 }
 
-fn insert_m(k: u32, s: Session) {
-    println!("s {:?}", s);
-    let mut m = HASHMAP.try_lock().unwrap().clone();
-    m.insert(k, s);
-    assert_eq!(m.is_empty(), false);
+impl AppState {
+    fn new() -> Self {
+        AppState {
+            session_map: Some(HashMap::new()),
+        }
+    }
 
-    println!("hashmap {:?}", m);
-}
+    fn get(&self, k: u32) -> Session {
+        assert_eq!(self.session_map.is_none(), false);
+        let m = self.session_map.as_ref().unwrap();
+        m.get(&k).cloned().unwrap()
+    }
 
-fn get_m(k: u32) -> Session {
-    let m = HASHMAP.try_lock().unwrap().clone();
-    println!("hashmap {:?}", m);
-    m.get(&k).cloned().unwrap()
+    fn insert(&mut self, k: u32, s: Session) {
+        assert_eq!(self.session_map.is_none(), false);
+        let m = self.session_map.as_mut().unwrap();
+        m.insert(k, s);
+        // self.session_map = Some(m);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +88,10 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
         acks,
     };
     // db.write().unwrap().insert(0, session);
-    insert_m(0, session);
+    // insert_m(0, session);
+    unsafe {
+        APP_STATE.insert(0, session);
+    }
 
     let resp = InitDkgResp {
         p0_pk,
@@ -98,6 +103,11 @@ fn init_dkg(req_body: InitDkgReq) -> Result<InitDkgResp> {
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn init(c_init_dkg_json: *const c_char) -> *mut c_char {
+    unsafe {
+        if APP_STATE.session_map.is_none() {
+            APP_STATE = AppState::new();
+        }
+    }
 
     let init_dkg_json = match get_str_from_c_char(c_init_dkg_json, "init_dkg_json") {
         Ok(s) => s,
@@ -151,7 +161,7 @@ struct CommitResp {
 fn commit_dkg(req_body: CommitReq) -> Result<CommitResp> {
     println!("req_body {:?}", req_body);
     // let session = db.read().unwrap().get(&0).cloned().unwrap();
-    let session = get_m(0);
+    let session = unsafe { APP_STATE.get(0) };
     let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
 
     let mut parts = session.parts;
@@ -191,7 +201,9 @@ fn commit_dkg(req_body: CommitReq) -> Result<CommitResp> {
         acks,
     };
     // db.write().unwrap().insert(0, updated_session);
-    insert_m(0, updated_session);
+    unsafe {
+        APP_STATE.insert(0, updated_session);
+    }
     let resp = CommitResp { p0_acks: resp_acks };
     println!("resp {:?}", resp);
     Ok(resp)
@@ -235,8 +247,107 @@ pub extern "C" fn commit(c_commit_json: *const c_char) -> *mut c_char {
         }
     };
 
-    println!("commit_resp_json {:?}", commit_resp_json);
     CString::new(commit_resp_json).unwrap().into_raw()
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct FinalizeReq {
+    sig_share_1: SignatureShare,
+    signed_msg_1: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct FinalizeResp {
+    is_success: bool,
+}
+fn finalize_dkg(req_body: FinalizeReq) -> Result<FinalizeResp> {
+    // let session = db.read().unwrap().get(&0).cloned().unwrap();
+    let session = unsafe { APP_STATE.get(0) };
+    let arc_node = session.node.clone();
+    let mut node = arc_node.try_lock().unwrap();
+    let acks = session.acks.clone();
+
+    // we handle all the `Ack`s.
+    for ack in acks {
+        for id in 0..1 {
+            match node
+                .handle_ack(&id, ack.clone())
+                .expect("Failed to handle Ack")
+            {
+                AckOutcome::Valid => (),
+                AckOutcome::Invalid(fault) => panic!("Invalid Ack: {:?}", fault),
+            }
+        }
+    }
+
+    let pub_key_set = node
+        .generate()
+        .expect("Failed to create `PublicKeySet` from node #0")
+        .0;
+    assert!(node.is_ready());
+
+    let (pks, opt_sks) = node.generate().unwrap_or_else(|_| {
+        panic!("Failed to create `PublicKeySet` and `SecretKeyShare` for node #0")
+    });
+    assert_eq!(pks, pub_key_set); // All nodes now know the public keys and public key shares.
+
+    let sks_0 = opt_sks.expect("Not an observer node: We receive a secret key share.");
+    let sig_share_0 = sks_0.sign(req_body.signed_msg_1.clone());
+    let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
+    sig_shares.insert(0, sig_share_0);
+    sig_shares.insert(1, req_body.sig_share_1);
+    let combine_sig = pub_key_set
+        .combine_signatures(&sig_shares)
+        .expect("The shares can be combined.");
+
+    let is_success = pub_key_set
+        .public_key()
+        .verify(&combine_sig, req_body.signed_msg_1);
+
+    println!("is_success {:?}", is_success);
+
+    Ok(FinalizeResp { is_success })
+}
+
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn finalize(c_finalize_json: *const c_char) -> *mut c_char {
+    let finalize_json = match get_str_from_c_char(c_finalize_json, "finalize_json") {
+        Ok(s) => s,
+        Err(e) => return error_to_c_string(e),
+    };
+
+    let finalize_req: FinalizeReq = match serde_json::from_str(&finalize_json) {
+        Ok(s) => s,
+        Err(e) => {
+            return error_to_c_string(ErrorFFIKind::E104 {
+                msg: "finalize_dkg".to_owned(),
+                e: e.to_string(),
+            })
+        }
+    };
+
+    let finalize_resp = match finalize_dkg(finalize_req) {
+        Ok(s) => s,
+        Err(e) => {
+            return error_to_c_string(ErrorFFIKind::E103 {
+                msg: "finalize_resp".to_owned(),
+                e: e.to_string(),
+            })
+        }
+    };
+
+    let finalize_resp_json = match serde_json::to_string(&finalize_resp) {
+        Ok(share) => share,
+        Err(e) => {
+            return error_to_c_string(ErrorFFIKind::E103 {
+                msg: "finalize_resp_json".to_owned(),
+                e: e.to_string(),
+            })
+        }
+    };
+
+    CString::new(finalize_resp_json).unwrap().into_raw()
 }
 
 pub fn get_str_from_c_char(c: *const c_char, err_msg: &str) -> Result<String, ErrorFFIKind> {
@@ -253,7 +364,6 @@ pub fn get_str_from_c_char(c: *const c_char, err_msg: &str) -> Result<String, Er
 
     Ok(s.to_string())
 }
-
 
 // This is present so it's easy to test that the code works natively in Rust via `cargo test`
 #[cfg(test)]

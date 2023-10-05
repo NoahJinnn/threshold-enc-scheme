@@ -20,7 +20,7 @@ use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 
 type Db = Arc<RwLock<HashMap<usize, Session>>>;
-const SERVER_URL: &str = "http://127.0.0.1:3000";
+const SERVER_URL: &str = "http://127.0.0.1:3002";
 #[derive(Debug, Clone)]
 struct Session {
     sk: SecretKey,

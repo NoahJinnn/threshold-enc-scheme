@@ -25,17 +25,8 @@ func main() {
 
 }
 
-type InitDkgReq struct {
-	P1Pk []uint16 `json:"p1_pk"`
-}
-
-type InitDkgResp struct {
-	P0Pk   []uint16      `json:"p0_pk"`
-	P0Part []interface{} `json:"p0_part"`
-}
-
 func initDkg(c echo.Context) error {
-	var body InitDkgReq
+	var body interface{}
 	if err := (&echo.DefaultBinder{}).BindBody(c, &body); err != nil {
 		return err
 	}
@@ -48,22 +39,13 @@ func initDkg(c echo.Context) error {
 
 	respStr := initFfi(string(jsonString))
 
-	var resp InitDkgResp
+	var resp interface{}
 	if err := json.Unmarshal([]byte(respStr), &resp); err != nil {
 		fmt.Printf("%v", err)
 		return err
 	}
 
 	return c.JSON(http.StatusOK, resp)
-}
-
-type CommitDkgReq struct {
-	P1Acks [][]interface{} `json:"p1_acks"`
-	P1Part []interface{}   `json:"p1_part"`
-}
-
-type CommitDkgResp struct {
-	P0Acks [][]interface{} `json:"p0_acks"`
 }
 
 func commit(c echo.Context) error {
@@ -76,7 +58,7 @@ func commit(c echo.Context) error {
 		fmt.Printf("%v", err)
 		return err
 	}
-	fmt.Printf("init dkg req %v\n", string(jsonString))
+	fmt.Printf("commit dkg req %v\n", string(jsonString))
 
 	respStr := commitFfi(string(jsonString))
 
@@ -90,8 +72,26 @@ func commit(c echo.Context) error {
 }
 
 func finalizeDkg(c echo.Context) error {
-	// Handle finalize_dkg route
-	return c.String(http.StatusOK, "finalize_dkg")
+	var body interface{}
+	if err := (&echo.DefaultBinder{}).BindBody(c, &body); err != nil {
+		return err
+	}
+	jsonString, err := json.Marshal(body)
+	if err != nil {
+		fmt.Printf("%v", err)
+		return err
+	}
+	fmt.Printf("finalize dkg req %v\n", string(jsonString))
+
+	respStr := finalizeFfi(string(jsonString))
+
+	var resp interface{}
+	if err := json.Unmarshal([]byte(respStr), &resp); err != nil {
+		fmt.Printf("%v", err)
+		return err
+	}
+
+	return c.JSON(http.StatusOK, resp)
 }
 
 func initFfi(jsonString string) string {
@@ -107,5 +107,13 @@ func commitFfi(jsonString string) string {
 	o := C.commit(input)
 	output := C.GoString(o)
 	fmt.Printf("commit ffi output %s\n", output)
+	return output
+}
+
+func finalizeFfi(jsonString string) string {
+	input := C.CString(jsonString)
+	o := C.finalize(input)
+	output := C.GoString(o)
+	fmt.Printf("finalize ffi output %s\n", output)
 	return output
 }
