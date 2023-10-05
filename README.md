@@ -68,10 +68,21 @@ Usage:
 
 Clone this repository
 
+Use Rust as a server node
+
 ```sh
 cd server
 cargo run # Server currently running on port 3000
 ```
+
+Use Go as a server node
+
+```sh
+cd go-ffi
+make run-dynamic # Server currently running on port 3002
+```
+
+In client node, you need to update a variable `SERVER_URL` to 3002 for Go server
 
 ```sh
 cd client
@@ -85,6 +96,9 @@ curl --location --request POST 'localhost:3001/init_dkg'
 curl --location --request POST 'localhost:3001/commit'
 curl --location --request POST 'localhost:3001/finalize_dkg'
 ```
+
+
+
 
 ```sh
 # client
@@ -132,6 +146,8 @@ is_success: FinalizeResp { is_success: true }
 2023-06-26T10:15:52.145721Z DEBUG request{method=POST uri=/finalize_dkg version=HTTP/1.1}: tower_http::trace::on_response: finished processing request latency=823 ms status=200
 2023-06-26T10:15:52.145821Z DEBUG hyper::proto::h1::io: flushed 111 bytes
 ```
+
+Log from Rust server
 
 ```sh
 # server
