@@ -105,6 +105,7 @@ async fn init_dkg(State(db): State<Db>) -> impl IntoResponse {
     let pub_keys: PubKeyMap<usize, threshold_crypto::PublicKey> = Arc::new(map);
     let mut rng = rand::rngs::OsRng::new().expect("Could not open OS random number generator.");
     let threshold = 0;
+    
     let (sync_key_gen, opt_part) =
         SyncKeyGen::new(1, sk.clone(), pub_keys.clone(), threshold, &mut rng)
             .unwrap_or_else(|_| panic!("Failed to create `SyncKeyGen` instance for node #{}", 1));

@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use std::{
     collections::{BTreeMap, HashMap},
     ffi::CStr,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 use threshold_crypto::{SecretKey, SignatureShare};
 
@@ -37,7 +37,6 @@ impl AppState {
         assert_eq!(self.session_map.is_none(), false);
         let m = self.session_map.as_mut().unwrap();
         m.insert(k, s);
-        // self.session_map = Some(m);
     }
 }
 

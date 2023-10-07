@@ -1,8 +1,6 @@
 ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # PHONY means that it doesn't correspond to a file; it always runs the build commands.
-
-
 .PHONY: build-dynamic
 build-dynamic:
 	@cd lib/ted && cargo build --release
@@ -13,6 +11,16 @@ build-dynamic:
 run-dynamic: build-dynamic
 	@./go-rust
 
+.PHONY: build-static
+build-static:
+	@cd lib/ted && cargo build --release
+	@cp lib/ted/target/release/libted.a lib/
+	go build main-static.go 
+
+.PHONY: run-static
+run-static: build-static
+	@./main-static
+
 # This is just for running the Rust lib tests natively via cargo
 .PHONY: test-rust-lib
 test-rust-lib:
@@ -20,4 +28,4 @@ test-rust-lib:
 
 .PHONY: clean
 clean:
-	rm -rf go-rust lib/libted.so lib/ted/target
+	rm -rf go-rust main_static lib/libted.so lib/ted/target
